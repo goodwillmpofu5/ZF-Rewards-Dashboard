@@ -47,7 +47,7 @@ st.markdown(
 # TITLE
 # =========================================================
 st.title("ZF Rewards Dashboard")
-st.caption("Filter by location and view Name, Total Weekly, Total Monthly, and Range Total charts.")
+st.caption("Filter by location and view Name, Weekly Average Hours, Monthly Average Hours, and Range Total charts.")
 
 # =========================================================
 # FILE UPLOAD / AUTO LOAD
@@ -59,7 +59,6 @@ uploaded_file = st.sidebar.file_uploader(
     type=["xlsx", "xls"]
 )
 
-# This checks the same folder where this Python file is saved
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_FILE = os.path.join(BASE_DIR, "Data for python.xlsx")
 
@@ -76,8 +75,7 @@ elif os.path.exists(DEFAULT_FILE):
 
 else:
     st.info(
-        "Please upload your Excel spreadsheet using the upload box on the left sidebar, "
-        "or place 'Data for python.xlsx' in the same folder as this Python file."
+        "Please upload your Excel spreadsheet using the upload box on the left sidebar."
     )
     st.stop()
 
@@ -107,7 +105,6 @@ if missing_columns:
 
     st.stop()
 
-# Keep only the required columns
 df = df_raw[required_columns].copy()
 
 # =========================================================
@@ -120,14 +117,12 @@ df["Range - Total"] = df["Range - Total"].astype(str).str.strip()
 df["Total weekly"] = pd.to_numeric(df["Total weekly"], errors="coerce").fillna(0)
 df["Total Monthly"] = pd.to_numeric(df["Total Monthly"], errors="coerce").fillna(0)
 
-# Remove blank or invalid locations
 df = df[
     df["Location"].notna()
     & (df["Location"] != "")
     & (df["Location"].str.lower() != "nan")
 ]
 
-# Clean blank range values
 df["Range - Total"] = df["Range - Total"].replace(
     ["nan", "None", "", "NaN"],
     "Not specified"
@@ -153,21 +148,20 @@ if not selected_locations:
 filtered_df = df[df["Location"].isin(selected_locations)].copy()
 
 # =========================================================
-# OVERALL KPI SUMMARY
+# OVERALL KPI SUMMARY - AVERAGES ONLY
 # =========================================================
 st.subheader("Overall Summary")
 
-kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+kpi1, kpi2, kpi3 = st.columns(3)
 
 kpi1.metric("Selected Locations", f"{len(selected_locations):,}")
-kpi2.metric("Number of Names", f"{filtered_df['Name'].nunique():,}")
-kpi3.metric("Total Weekly", f"{filtered_df['Total weekly'].sum():,.2f}")
-kpi4.metric("Total Monthly", f"{filtered_df['Total Monthly'].sum():,.2f}")
+kpi2.metric("Weekly Average Hours", f"{filtered_df['Total weekly'].mean():,.2f}")
+kpi3.metric("Monthly Average Hours", f"{filtered_df['Total Monthly'].mean():,.2f}")
 
 st.divider()
 
 # =========================================================
-# SELECTED LOCATION SUMMARY TABLE
+# SELECTED LOCATION SUMMARY TABLE - AVERAGES ONLY
 # =========================================================
 st.subheader("Selected Location Summary")
 
@@ -176,12 +170,19 @@ location_summary = (
     .groupby("Location", as_index=False)
     .agg({
         "Name": "count",
-        "Total weekly": "sum",
-        "Total Monthly": "sum"
+        "Total weekly": "mean",
+        "Total Monthly": "mean"
     })
-    .rename(columns={"Name": "Number of Records"})
-    .sort_values("Total weekly", ascending=False)
+    .rename(columns={
+        "Name": "Number of Records",
+        "Total weekly": "Weekly Average Hours",
+        "Total Monthly": "Monthly Average Hours"
+    })
+    .sort_values("Weekly Average Hours", ascending=False)
 )
+
+location_summary["Weekly Average Hours"] = location_summary["Weekly Average Hours"].round(2)
+location_summary["Monthly Average Hours"] = location_summary["Monthly Average Hours"].round(2)
 
 st.dataframe(
     location_summary,
@@ -206,30 +207,37 @@ for tab, location in zip(location_tabs, selected_locations):
 
         st.markdown(f"## {str(location).title()}")
 
-        # Group by Name in case the same name appears more than once
+        # Average hours by Name
         table_df = (
             location_df
             .groupby("Name", as_index=False)
             .agg({
-                "Total weekly": "sum",
-                "Total Monthly": "sum"
+                "Total weekly": "mean",
+                "Total Monthly": "mean"
             })
-            .sort_values("Total weekly", ascending=False)
+            .rename(columns={
+                "Total weekly": "Weekly Average Hours",
+                "Total Monthly": "Monthly Average Hours"
+            })
+            .sort_values("Weekly Average Hours", ascending=False)
         )
 
+        table_df["Weekly Average Hours"] = table_df["Weekly Average Hours"].round(2)
+        table_df["Monthly Average Hours"] = table_df["Monthly Average Hours"].round(2)
+
         # =============================================
-        # LOCATION KPIs
+        # LOCATION KPIs - AVERAGES ONLY
         # =============================================
         c1, c2, c3 = st.columns(3)
 
         c1.metric("Names", f"{table_df['Name'].nunique():,}")
-        c2.metric("Total Weekly", f"{table_df['Total weekly'].sum():,.2f}")
-        c3.metric("Total Monthly", f"{table_df['Total Monthly'].sum():,.2f}")
+        c2.metric("Weekly Average Hours", f"{table_df['Weekly Average Hours'].mean():,.2f}")
+        c3.metric("Monthly Average Hours", f"{table_df['Monthly Average Hours'].mean():,.2f}")
 
         # =============================================
         # SCROLLABLE TABLE
         # =============================================
-        st.markdown("### Name, Total Weekly and Total Monthly Table")
+        st.markdown("### Name, Weekly Average Hours and Monthly Average Hours Table")
 
         st.dataframe(
             table_df,
@@ -239,14 +247,12 @@ for tab, location in zip(location_tabs, selected_locations):
         )
 
         # =============================================
-        # TOTAL WEEKLY BAR CHART
+        # WEEKLY AVERAGE HOURS BAR CHART
         # =============================================
-        st.markdown("### Total Weekly Graph")
+        st.markdown("### Weekly Average Hours Graph")
 
         if len(table_df) > 0:
 
-            # This fixes the error where a location has only 1 record.
-            # Streamlit sliders cannot have min_value and max_value both equal to 1.
             if len(table_df) == 1:
                 chart_df = table_df.copy()
             else:
@@ -262,11 +268,11 @@ for tab, location in zip(location_tabs, selected_locations):
 
             weekly_fig = px.bar(
                 chart_df,
-                x="Total weekly",
+                x="Weekly Average Hours",
                 y="Name",
                 orientation="h",
-                text="Total weekly",
-                title=f"Total Weekly by Name - {str(location).title()}",
+                text="Weekly Average Hours",
+                title=f"Weekly Average Hours by Name - {str(location).title()}",
                 color_discrete_sequence=[GREEN]
             )
 
@@ -276,7 +282,7 @@ for tab, location in zip(location_tabs, selected_locations):
                 plot_bgcolor="white",
                 paper_bgcolor="white",
                 title_font_color=GREEN,
-                xaxis_title="Total Weekly",
+                xaxis_title="Weekly Average Hours",
                 yaxis_title="Name"
             )
 
@@ -291,7 +297,7 @@ for tab, location in zip(location_tabs, selected_locations):
             )
 
         else:
-            st.info("No Total Weekly records available for this location.")
+            st.info("No weekly average records available for this location.")
 
         # =============================================
         # RANGE - TOTAL PIE CHART
@@ -303,16 +309,19 @@ for tab, location in zip(location_tabs, selected_locations):
             .groupby("Range - Total", as_index=False)
             .agg({
                 "Name": "count",
-                "Total weekly": "sum",
-                "Total Monthly": "sum"
+                "Total weekly": "mean",
+                "Total Monthly": "mean"
             })
             .rename(columns={
                 "Name": "Count",
-                "Total weekly": "Total Weekly",
-                "Total Monthly": "Total Monthly"
+                "Total weekly": "Weekly Average Hours",
+                "Total Monthly": "Monthly Average Hours"
             })
             .sort_values("Count", ascending=False)
         )
+
+        range_df["Weekly Average Hours"] = range_df["Weekly Average Hours"].round(2)
+        range_df["Monthly Average Hours"] = range_df["Monthly Average Hours"].round(2)
 
         if len(range_df) > 0:
 
@@ -360,7 +369,12 @@ for tab, location in zip(location_tabs, selected_locations):
 st.sidebar.divider()
 st.sidebar.header("Download")
 
-csv_data = filtered_df.to_csv(index=False).encode("utf-8")
+download_df = filtered_df.rename(columns={
+    "Total weekly": "Weekly Hours",
+    "Total Monthly": "Monthly Hours"
+})
+
+csv_data = download_df.to_csv(index=False).encode("utf-8")
 
 st.sidebar.download_button(
     label="Download Filtered Data as CSV",
