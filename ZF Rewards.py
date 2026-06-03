@@ -17,7 +17,21 @@ st.set_page_config(
 # COLORS
 # =========================================================
 GREEN = "#008000"
+DARK_GREEN = "#006400"
+MEDIUM_GREEN = "#2E8B57"
 LIGHT_GREEN = "#EAF7EA"
+SOFT_GREEN = "#90EE90"
+
+GREEN_SEQUENCE = [
+    "#006400",
+    "#008000",
+    "#228B22",
+    "#2E8B57",
+    "#3CB371",
+    "#66CDAA",
+    "#90EE90",
+    "#98FB98"
+]
 
 # =========================================================
 # CUSTOM CSS
@@ -50,7 +64,7 @@ st.markdown(
 st.title("ZF Rewards Dashboard")
 st.caption(
     "Filter by location and compare weekly average hours, monthly average hours, "
-    "range totals, and same-company performance across locations."
+    "range totals, and same-restaurant performance across locations."
 )
 
 # =========================================================
@@ -118,25 +132,22 @@ df["Name"] = df["Name"].astype(str).str.strip()
 df["Location"] = df["Location"].astype(str).str.strip()
 df["Range - Total"] = df["Range - Total"].astype(str).str.strip()
 
-# Keep blanks as NaN instead of forcing them to zero
 df["Total weekly"] = pd.to_numeric(df["Total weekly"], errors="coerce")
 df["Total Monthly"] = pd.to_numeric(df["Total Monthly"], errors="coerce")
 
-# Remove blank or invalid locations
 df = df[
     df["Location"].notna()
     & (df["Location"] != "")
     & (df["Location"].str.lower() != "nan")
 ]
 
-# Clean blank range values
 df["Range - Total"] = df["Range - Total"].replace(
     ["nan", "None", "", "NaN"],
     "Not specified"
 )
 
 # =========================================================
-# COMPANY NAME CLEANING
+# RESTAURANT / COMPANY NAME CLEANING
 # =========================================================
 def clean_company_text(value):
     value = str(value).upper().strip()
@@ -161,6 +172,8 @@ BRAND_KEYWORDS = {
     "ROMANS PIZZA": "Romans Pizza",
     "ROMAN S PIZZA": "Romans Pizza",
     "CHICKEN LICKEN": "Chicken Licken",
+    "GALITOS": "Galito's",
+    "GALITO": "Galito's",
     "PIZZA HUT": "Pizza Hut",
     "SUBWAY": "Subway",
     "SHOPRITE": "Shoprite",
@@ -266,7 +279,7 @@ st.divider()
 # =========================================================
 st.subheader("Comparison Graphs")
 
-# Leave out locations with fewer than 10 entries
+# Exclude locations with fewer than 10 entries
 location_counts = df.groupby("Location").size().reset_index(name="Entry Count")
 valid_locations = location_counts[location_counts["Entry Count"] >= 10]["Location"].tolist()
 
@@ -277,29 +290,42 @@ comparison_df = comparison_df.dropna(subset=["Total weekly"])
 # HIGHEST AND LOWEST WEEKLY HOURS BY LOCATION
 # =========================================================
 st.markdown("### Highest and Lowest Weekly Hours by Location")
-st.caption("Locations with fewer than 10 entries are excluded.")
+st.caption(
+    "Locations with fewer than 10 entries are excluded. "
+    "Restaurant names are shown on the clustered columns."
+)
 
 if len(comparison_df) > 0:
 
-    high_low_df = (
+    highest_rows = (
         comparison_df
-        .groupby("Location", as_index=False)
-        .agg(
-            Highest_Weekly_Hours=("Total weekly", "max"),
-            Lowest_Weekly_Hours=("Total weekly", "min"),
-            Entry_Count=("Name", "count")
-        )
-        .sort_values("Highest_Weekly_Hours", ascending=False)
+        .loc[comparison_df.groupby("Location")["Total weekly"].idxmax()]
+        .copy()
     )
 
-    high_low_df["Highest Weekly Hours"] = high_low_df["Highest_Weekly_Hours"].round(2)
-    high_low_df["Lowest Weekly Hours"] = high_low_df["Lowest_Weekly_Hours"].round(2)
+    lowest_rows = (
+        comparison_df
+        .loc[comparison_df.groupby("Location")["Total weekly"].idxmin()]
+        .copy()
+    )
 
-    high_low_long = high_low_df.melt(
-        id_vars=["Location", "Entry_Count"],
-        value_vars=["Highest Weekly Hours", "Lowest Weekly Hours"],
-        var_name="Measure",
-        value_name="Weekly Hours"
+    highest_rows["Measure"] = "Highest Weekly Hours"
+    lowest_rows["Measure"] = "Lowest Weekly Hours"
+
+    high_low_long = pd.concat([highest_rows, lowest_rows], ignore_index=True)
+
+    high_low_long["Weekly Hours"] = high_low_long["Total weekly"].round(2)
+    high_low_long["Restaurant Compared"] = high_low_long["Company Group"]
+    high_low_long["Bar Label"] = (
+        high_low_long["Restaurant Compared"]
+        + "<br>"
+        + high_low_long["Weekly Hours"].astype(str)
+        + " hrs"
+    )
+
+    high_low_long = high_low_long.sort_values(
+        ["Location", "Measure"],
+        ascending=[True, True]
     )
 
     high_low_fig = px.bar(
@@ -308,43 +334,93 @@ if len(comparison_df) > 0:
         y="Weekly Hours",
         color="Measure",
         barmode="group",
-        text="Weekly Hours",
-        title="Highest vs Lowest Weekly Hours by Location"
+        text="Bar Label",
+        hover_data={
+            "Restaurant Compared": True,
+            "Name": True,
+            "Weekly Hours": ":.2f",
+            "Measure": True,
+            "Location": True,
+            "Bar Label": False
+        },
+        title="Highest vs Lowest Weekly Hours by Location",
+        color_discrete_map={
+            "Highest Weekly Hours": DARK_GREEN,
+            "Lowest Weekly Hours": SOFT_GREEN
+        }
     )
 
     high_low_fig.update_traces(
-        texttemplate="%{text:,.2f}",
-        textposition="outside"
+        textposition="outside",
+        textfont_size=11
     )
 
     high_low_fig.update_layout(
-        height=600,
+        height=700,
         plot_bgcolor="white",
         paper_bgcolor="white",
         title_font_color=GREEN,
         xaxis_title="Location",
         yaxis_title="Weekly Hours",
         xaxis_tickangle=-45,
-        legend_title_text="Measure"
+        legend_title_text="Measure",
+        bargap=0.35,
+        bargroupgap=0.22
     )
 
     st.plotly_chart(high_low_fig, use_container_width=True)
 
     st.markdown("### Highest and Lowest Weekly Hours Table")
 
-    display_high_low_df = high_low_df[[
+    high_table = highest_rows[[
         "Location",
-        "Entry_Count",
-        "Highest Weekly Hours",
-        "Lowest Weekly Hours"
-    ]].rename(columns={
-        "Entry_Count": "Entry Count"
+        "Company Group",
+        "Name",
+        "Total weekly"
+    ]].copy()
+
+    high_table = high_table.rename(columns={
+        "Company Group": "Highest Restaurant",
+        "Name": "Highest Name in Spreadsheet",
+        "Total weekly": "Highest Weekly Hours"
     })
 
+    low_table = lowest_rows[[
+        "Location",
+        "Company Group",
+        "Name",
+        "Total weekly"
+    ]].copy()
+
+    low_table = low_table.rename(columns={
+        "Company Group": "Lowest Restaurant",
+        "Name": "Lowest Name in Spreadsheet",
+        "Total weekly": "Lowest Weekly Hours"
+    })
+
+    high_low_table = pd.merge(high_table, low_table, on="Location", how="inner")
+
+    entry_counts_table = location_counts.rename(columns={"Entry Count": "Entry Count"})
+    high_low_table = pd.merge(high_low_table, entry_counts_table, on="Location", how="left")
+
+    high_low_table["Highest Weekly Hours"] = high_low_table["Highest Weekly Hours"].round(2)
+    high_low_table["Lowest Weekly Hours"] = high_low_table["Lowest Weekly Hours"].round(2)
+
+    high_low_table = high_low_table[[
+        "Location",
+        "Entry Count",
+        "Highest Restaurant",
+        "Highest Name in Spreadsheet",
+        "Highest Weekly Hours",
+        "Lowest Restaurant",
+        "Lowest Name in Spreadsheet",
+        "Lowest Weekly Hours"
+    ]].sort_values("Highest Weekly Hours", ascending=False)
+
     st.dataframe(
-        display_high_low_df,
+        high_low_table,
         use_container_width=True,
-        height=350,
+        height=400,
         hide_index=True
     )
 
@@ -354,11 +430,11 @@ else:
 st.divider()
 
 # =========================================================
-# SAME COMPANY ACROSS DIFFERENT LOCATIONS
+# SAME RESTAURANT ACROSS DIFFERENT LOCATIONS
 # =========================================================
-st.markdown("### Same Company Comparison Across Locations")
+st.markdown("### Same Restaurant Comparison Across Locations")
 st.caption(
-    "This compares companies that appear in more than one location. "
+    "This compares restaurants that appear in more than one location. "
     "Locations with fewer than 10 entries are excluded."
 )
 
@@ -402,13 +478,22 @@ if len(company_location_summary) > 0:
 
     priority_companies = [
         company for company in company_options
-        if company in ["Burger King", "Debonairs", "KFC", "McDonald's", "Nando's", "Steers"]
+        if company in [
+            "Burger King",
+            "Debonairs",
+            "KFC",
+            "McDonald's",
+            "Nando's",
+            "Steers",
+            "Chicken Licken",
+            "Galito's"
+        ]
     ]
 
-    default_companies = priority_companies[:5] if priority_companies else company_options[:5]
+    default_companies = priority_companies[:8] if priority_companies else company_options[:8]
 
     selected_companies = st.multiselect(
-        "Select companies to compare across locations",
+        "Select restaurants to compare across locations",
         options=company_options,
         default=default_companies
     )
@@ -419,38 +504,58 @@ if len(company_location_summary) > 0:
 
     if len(selected_company_df) > 0:
 
+        selected_company_df["Bar Label"] = (
+            selected_company_df["Company Group"]
+            + "<br>"
+            + selected_company_df["Weekly_Average_Hours"].astype(str)
+            + " hrs"
+        )
+
         company_compare_fig = px.bar(
             selected_company_df,
             x="Company Group",
             y="Weekly_Average_Hours",
             color="Location",
             barmode="group",
-            text="Weekly_Average_Hours",
-            title="Weekly Average Hours for Same Companies Across Locations"
+            text="Bar Label",
+            hover_data={
+                "Company Group": True,
+                "Location": True,
+                "Entry_Count": True,
+                "Weekly_Average_Hours": ":.2f",
+                "Highest_Weekly_Hours": ":.2f",
+                "Lowest_Weekly_Hours": ":.2f",
+                "Monthly_Average_Hours": ":.2f",
+                "Bar Label": False
+            },
+            title="Weekly Average Hours for Same Restaurants Across Locations",
+            color_discrete_sequence=GREEN_SEQUENCE
         )
 
         company_compare_fig.update_traces(
-            texttemplate="%{text:,.2f}",
-            textposition="outside"
+            textposition="outside",
+            textfont_size=11
         )
 
         company_compare_fig.update_layout(
-            height=650,
+            height=750,
             plot_bgcolor="white",
             paper_bgcolor="white",
             title_font_color=GREEN,
-            xaxis_title="Company",
+            xaxis_title="Restaurant",
             yaxis_title="Weekly Average Hours",
             legend_title_text="Location",
-            xaxis_tickangle=-30
+            xaxis_tickangle=-30,
+            bargap=0.35,
+            bargroupgap=0.22
         )
 
         st.plotly_chart(company_compare_fig, use_container_width=True)
 
-        st.markdown("### Same Company Comparison Table")
+        st.markdown("### Same Restaurant Comparison Table")
 
         same_company_table = selected_company_df.rename(columns={
-            "Company Group": "Company",
+            "Company Group": "Restaurant",
             "Entry_Count": "Entry Count",
             "Weekly_Average_Hours": "Weekly Average Hours",
             "Highest_Weekly_Hours": "Highest Weekly Hours",
@@ -459,14 +564,14 @@ if len(company_location_summary) > 0:
         })
 
         same_company_table = same_company_table[[
-            "Company",
+            "Restaurant",
             "Location",
             "Entry Count",
             "Weekly Average Hours",
             "Highest Weekly Hours",
             "Lowest Weekly Hours",
             "Monthly Average Hours"
-        ]].sort_values(["Company", "Location"])
+        ]].sort_values(["Restaurant", "Location"])
 
         st.dataframe(
             same_company_table,
@@ -476,11 +581,11 @@ if len(company_location_summary) > 0:
         )
 
     else:
-        st.info("Please select at least one company to compare.")
+        st.info("Please select at least one restaurant to compare.")
 
 else:
     st.info(
-        "No same-company matches were found across different locations after excluding locations with fewer than 10 entries."
+        "No same-restaurant matches were found across different locations after excluding locations with fewer than 10 entries."
     )
 
 st.divider()
@@ -548,7 +653,7 @@ for tab, location in zip(location_tabs, selected_locations):
                 chart_df = table_df.copy()
             else:
                 top_n = st.slider(
-                    f"Number of people/companies to show in graph for {str(location).title()}",
+                    f"Number of people/restaurants to show in graph for {str(location).title()}",
                     min_value=1,
                     max_value=len(table_df),
                     value=min(30, len(table_df)),
