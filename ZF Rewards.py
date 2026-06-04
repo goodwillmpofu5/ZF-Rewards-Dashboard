@@ -18,7 +18,6 @@ st.set_page_config(
 # =========================================================
 GREEN = "#008000"
 DARK_GREEN = "#006400"
-MEDIUM_GREEN = "#2E8B57"
 LIGHT_GREEN = "#EAF7EA"
 SOFT_GREEN = "#90EE90"
 
@@ -63,7 +62,7 @@ st.markdown(
 # =========================================================
 st.title("ZF Rewards Dashboard")
 st.caption(
-    "Filter by location and compare weekly average hours, monthly average hours, "
+    "Filter by location and compare actual hours, average hours, "
     "range totals, and same-restaurant performance across locations."
 )
 
@@ -228,7 +227,7 @@ if not selected_locations:
 filtered_df = df[df["Location"].isin(selected_locations)].copy()
 
 # =========================================================
-# OVERALL KPI SUMMARY
+# OVERALL KPI SUMMARY - AVERAGES
 # =========================================================
 st.subheader("Overall Summary")
 
@@ -241,7 +240,7 @@ kpi3.metric("Monthly Average Hours", f"{filtered_df['Total Monthly'].mean():,.2f
 st.divider()
 
 # =========================================================
-# LOCATION SUMMARY TABLE
+# LOCATION SUMMARY TABLE - AVERAGES
 # =========================================================
 st.subheader("Selected Location Summary")
 
@@ -287,7 +286,7 @@ comparison_df = df[df["Location"].isin(valid_locations)].copy()
 comparison_df = comparison_df.dropna(subset=["Total weekly"])
 
 # =========================================================
-# HIGHEST AND LOWEST WEEKLY HOURS BY LOCATION
+# HIGHEST AND LOWEST WEEKLY HOURS BY LOCATION - ACTUAL
 # =========================================================
 st.markdown("### Highest and Lowest Weekly Hours by Location")
 st.caption(
@@ -321,11 +320,6 @@ if len(comparison_df) > 0:
         + "<br>"
         + high_low_long["Weekly Hours"].astype(str)
         + " hrs"
-    )
-
-    high_low_long = high_low_long.sort_values(
-        ["Location", "Measure"],
-        ascending=[True, True]
     )
 
     high_low_fig = px.bar(
@@ -364,8 +358,8 @@ if len(comparison_df) > 0:
         yaxis_title="Weekly Hours",
         xaxis_tickangle=-45,
         legend_title_text="Measure",
-        bargap=0.35,
-        bargroupgap=0.22
+        bargap=0.45,
+        bargroupgap=0.35
     )
 
     st.plotly_chart(high_low_fig, use_container_width=True)
@@ -399,9 +393,7 @@ if len(comparison_df) > 0:
     })
 
     high_low_table = pd.merge(high_table, low_table, on="Location", how="inner")
-
-    entry_counts_table = location_counts.rename(columns={"Entry Count": "Entry Count"})
-    high_low_table = pd.merge(high_low_table, entry_counts_table, on="Location", how="left")
+    high_low_table = pd.merge(high_low_table, location_counts, on="Location", how="left")
 
     high_low_table["Highest Weekly Hours"] = high_low_table["Highest Weekly Hours"].round(2)
     high_low_table["Lowest Weekly Hours"] = high_low_table["Lowest Weekly Hours"].round(2)
@@ -430,7 +422,7 @@ else:
 st.divider()
 
 # =========================================================
-# SAME RESTAURANT ACROSS DIFFERENT LOCATIONS
+# SAME RESTAURANT ACROSS DIFFERENT LOCATIONS - AVERAGES
 # =========================================================
 st.markdown("### Same Restaurant Comparison Across Locations")
 st.caption(
@@ -521,7 +513,6 @@ if len(company_location_summary) > 0:
             hover_data={
                 "Company Group": True,
                 "Location": True,
-                "Entry_Count": True,
                 "Weekly_Average_Hours": ":.2f",
                 "Highest_Weekly_Hours": ":.2f",
                 "Lowest_Weekly_Hours": ":.2f",
@@ -546,8 +537,8 @@ if len(company_location_summary) > 0:
             yaxis_title="Weekly Average Hours",
             legend_title_text="Location",
             xaxis_tickangle=-30,
-            bargap=0.35,
-            bargroupgap=0.22
+            bargap=0.45,
+            bargroupgap=0.35
         )
 
         st.plotly_chart(company_compare_fig, use_container_width=True)
@@ -556,7 +547,6 @@ if len(company_location_summary) > 0:
 
         same_company_table = selected_company_df.rename(columns={
             "Company Group": "Restaurant",
-            "Entry_Count": "Entry Count",
             "Weekly_Average_Hours": "Weekly Average Hours",
             "Highest_Weekly_Hours": "Highest Weekly Hours",
             "Lowest_Weekly_Hours": "Lowest Weekly Hours",
@@ -566,7 +556,6 @@ if len(company_location_summary) > 0:
         same_company_table = same_company_table[[
             "Restaurant",
             "Location",
-            "Entry Count",
             "Weekly Average Hours",
             "Highest Weekly Hours",
             "Lowest Weekly Hours",
@@ -604,36 +593,38 @@ for tab, location in zip(location_tabs, selected_locations):
 
         st.markdown(f"## {str(location).title()}")
 
-        table_df = (
-            location_df
-            .groupby("Name", as_index=False)
-            .agg({
-                "Total weekly": "mean",
-                "Total Monthly": "mean"
-            })
-            .rename(columns={
-                "Total weekly": "Weekly Average Hours",
-                "Total Monthly": "Monthly Average Hours"
-            })
-            .sort_values("Weekly Average Hours", ascending=False)
-        )
+        # =================================================
+        # ACTUAL HOURS TABLE
+        # =================================================
+        table_df = location_df[[
+            "Name",
+            "Total weekly",
+            "Total Monthly"
+        ]].copy()
 
-        table_df["Weekly Average Hours"] = table_df["Weekly Average Hours"].round(2)
-        table_df["Monthly Average Hours"] = table_df["Monthly Average Hours"].round(2)
+        table_df = table_df.rename(columns={
+            "Total weekly": "Weekly Hours",
+            "Total Monthly": "Monthly Hours"
+        })
+
+        table_df["Weekly Hours"] = table_df["Weekly Hours"].round(2)
+        table_df["Monthly Hours"] = table_df["Monthly Hours"].round(2)
+
+        table_df = table_df.sort_values("Weekly Hours", ascending=False)
 
         # =============================================
-        # LOCATION KPIs
+        # LOCATION KPIs - AVERAGES
         # =============================================
         c1, c2, c3 = st.columns(3)
 
         c1.metric("Names", f"{table_df['Name'].nunique():,}")
-        c2.metric("Weekly Average Hours", f"{table_df['Weekly Average Hours'].mean():,.2f}")
-        c3.metric("Monthly Average Hours", f"{table_df['Monthly Average Hours'].mean():,.2f}")
+        c2.metric("Weekly Average Hours", f"{table_df['Weekly Hours'].mean():,.2f}")
+        c3.metric("Monthly Average Hours", f"{table_df['Monthly Hours'].mean():,.2f}")
 
         # =============================================
-        # SCROLLABLE TABLE
+        # SCROLLABLE TABLE - ACTUAL HOURS
         # =============================================
-        st.markdown("### Name, Weekly Average Hours and Monthly Average Hours Table")
+        st.markdown("### Name, Weekly Hours and Monthly Hours Table")
 
         st.dataframe(
             table_df,
@@ -643,9 +634,9 @@ for tab, location in zip(location_tabs, selected_locations):
         )
 
         # =============================================
-        # WEEKLY AVERAGE HOURS BAR CHART
+        # WEEKLY HOURS BAR CHART - ACTUAL HOURS
         # =============================================
-        st.markdown("### Weekly Average Hours Graph")
+        st.markdown("### Weekly Hours Graph")
 
         if len(table_df) > 0:
 
@@ -664,11 +655,11 @@ for tab, location in zip(location_tabs, selected_locations):
 
             weekly_fig = px.bar(
                 chart_df,
-                x="Weekly Average Hours",
+                x="Weekly Hours",
                 y="Name",
                 orientation="h",
-                text="Weekly Average Hours",
-                title=f"Weekly Average Hours by Name - {str(location).title()}",
+                text="Weekly Hours",
+                title=f"Actual Weekly Hours by Name - {str(location).title()}",
                 color_discrete_sequence=[GREEN]
             )
 
@@ -678,8 +669,9 @@ for tab, location in zip(location_tabs, selected_locations):
                 plot_bgcolor="white",
                 paper_bgcolor="white",
                 title_font_color=GREEN,
-                xaxis_title="Weekly Average Hours",
-                yaxis_title="Name"
+                xaxis_title="Weekly Hours",
+                yaxis_title="Name",
+                bargap=0.35
             )
 
             weekly_fig.update_traces(
@@ -693,7 +685,7 @@ for tab, location in zip(location_tabs, selected_locations):
             )
 
         else:
-            st.info("No weekly average records available for this location.")
+            st.info("No weekly hours records available for this location.")
 
         # =============================================
         # RANGE - TOTAL PIE CHART
