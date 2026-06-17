@@ -52,18 +52,35 @@ DEFAULT_FILE = os.path.join(BASE_DIR, "Data for python.xlsx")
 LOGO_FILE = os.path.join(BASE_DIR, "bcfood_logo.png")
 
 
+# =========================================================
+# BASIC HELPERS
+# =========================================================
+def rerun_app():
+    """Rerun app safely for different Streamlit versions."""
+    if hasattr(st, "rerun"):
+        st.rerun()
+    else:
+        st.experimental_rerun()
+
+
 def show_logo(width=260):
     """Display BCFOOD logo if the logo file exists."""
     if os.path.exists(LOGO_FILE):
         st.image(LOGO_FILE, width=width)
     else:
-        st.warning("Logo file not found. Please place bcfood_logo.png in the same folder.")
+        st.warning(
+            "Logo file not found. Please make sure bcfood_logo.png is in the same folder as this app."
+        )
 
 
 def show_sidebar_logo():
     """Display BCFOOD logo in sidebar if the logo file exists."""
     if os.path.exists(LOGO_FILE):
         st.sidebar.image(LOGO_FILE, use_container_width=True)
+
+
+def load_excel(file_source):
+    return pd.read_excel(file_source, sheet_name=0, header=0)
 
 
 # =========================================================
@@ -92,14 +109,26 @@ st.markdown(
         }}
 
         .stButton > button {{
-            border-color: {ACCENT};
-            color: {PRIMARY};
-            border-radius: 20px;
+            border-radius: 12px;
+            border: 1px solid {ACCENT};
+            padding: 0.45rem 0.75rem;
+            font-weight: 600;
         }}
 
         .stButton > button:hover {{
             border-color: {PRIMARY};
-            color: {PRIMARY};
+        }}
+
+        button[kind="primary"] {{
+            background-color: {PRIMARY} !important;
+            border-color: {PRIMARY} !important;
+            color: white !important;
+        }}
+
+        button[kind="secondary"] {{
+            background-color: white !important;
+            border-color: {ACCENT} !important;
+            color: {PRIMARY} !important;
         }}
     </style>
     """,
@@ -107,7 +136,7 @@ st.markdown(
 )
 
 # =========================================================
-# TITLE
+# TITLE / HEADER
 # =========================================================
 header_logo, header_text = st.columns([1.1, 4.5])
 
@@ -125,17 +154,13 @@ with header_text:
 # FILE UPLOAD / AUTO LOAD
 # =========================================================
 show_sidebar_logo()
+
 st.sidebar.header("Upload Data")
 
 uploaded_file = st.sidebar.file_uploader(
     "Upload Excel Spreadsheet",
     type=["xlsx", "xls"],
 )
-
-
-def load_excel(file_source):
-    return pd.read_excel(file_source, sheet_name=0, header=0)
-
 
 if uploaded_file is not None:
     df_raw = load_excel(uploaded_file)
@@ -217,10 +242,13 @@ def normalise_range_total(value):
 
         if start <= 1 and end <= 9:
             return "01 - 09 hours"
+
         if 10 <= start <= 14 and 10 <= end <= 14:
             return "10 - 14 hours"
+
         if 15 <= start <= 18 and 15 <= end <= 18:
             return "15 to 18 hours"
+
         if 19 <= start <= 24 and 19 <= end <= 24:
             return "19 to 24 hours"
 
@@ -266,7 +294,7 @@ df = df[
     df["Location"].notna()
     & (df["Location"] != "")
     & (df["Location"].str.lower() != "nan")
-]
+].copy()
 
 df["Recommendation"] = df["Range - Total"].apply(recommendation_text)
 df["Recommended Monthly Hours"] = df["Range - Total"].apply(recommendation_hours)
@@ -334,37 +362,99 @@ def identify_company_group(name):
 df["Company Group"] = df["Name"].apply(identify_company_group)
 
 # =========================================================
-# BUTTON SLICER HELPERS
+# TILE BUTTON SLICER
 # =========================================================
-def button_multiselect(label, options, default, key, container=st):
+def safe_widget_key(value):
+    value = str(value)
+    value = re.sub(r"[^A-Za-z0-9_]+", "_", value)
+    return value[:80]
+
+
+def tile_button_multiselect(
+    label,
+    options,
+    default,
+    key,
+    container=st,
+    columns_per_row=2,
+):
     """
-    Render a button-style multi-select slicer.
-    Uses st.pills when available; otherwise falls back to checkboxes.
+    Tile-style button slicer.
+    Selected options appear as primary buttons with a tick.
     """
     options = list(options)
     default = [item for item in default if item in options]
 
-    if hasattr(container, "pills"):
-        selected = container.pills(
-            label,
-            options=options,
-            default=default,
-            selection_mode="multi",
-            key=key,
-        )
-        return list(selected or [])
+    state_key = f"{key}_selected"
+    options_key = f"{key}_options"
+
+    if state_key not in st.session_state:
+        st.session_state[state_key] = default
+
+    previous_options = st.session_state.get(options_key)
+
+    if previous_options != options:
+        kept_selection = [
+            item for item in st.session_state[state_key] if item in options
+        ]
+
+        if kept_selection:
+            st.session_state[state_key] = kept_selection
+        else:
+            st.session_state[state_key] = default
+
+        st.session_state[options_key] = options
+    else:
+        st.session_state[state_key] = [
+            item for item in st.session_state[state_key] if item in options
+        ]
 
     container.markdown(f"**{label}**")
-    selected = []
-    columns = container.columns(2)
+
+    action_cols = container.columns(2)
+
+    with action_cols[0]:
+        if st.button(
+            "Select all",
+            key=f"{key}_select_all",
+            use_container_width=True,
+            type="secondary",
+        ):
+            st.session_state[state_key] = options.copy()
+            rerun_app()
+
+    with action_cols[1]:
+        if st.button(
+            "Clear",
+            key=f"{key}_clear_all",
+            use_container_width=True,
+            type="secondary",
+        ):
+            st.session_state[state_key] = []
+            rerun_app()
+
+    cols = container.columns(columns_per_row)
 
     for index, option in enumerate(options):
-        option_key = f"{key}_{index}_{str(option)}"
-        with columns[index % 2]:
-            if st.checkbox(str(option), value=option in default, key=option_key):
-                selected.append(option)
+        selected = option in st.session_state[state_key]
+        button_label = f"✓ {option}" if selected else f"○ {option}"
+        button_type = "primary" if selected else "secondary"
 
-    return selected
+        with cols[index % columns_per_row]:
+            if st.button(
+                button_label,
+                key=f"{key}_{index}_{safe_widget_key(option)}",
+                use_container_width=True,
+                type=button_type,
+            ):
+                if selected:
+                    st.session_state[state_key].remove(option)
+                else:
+                    st.session_state[state_key].append(option)
+
+                rerun_app()
+
+    return st.session_state[state_key]
 
 
 # =========================================================
@@ -374,12 +464,13 @@ st.sidebar.header("Dashboard Slicers")
 
 locations = sorted(df["Location"].dropna().unique())
 
-selected_locations = button_multiselect(
+selected_locations = tile_button_multiselect(
     "Select Location",
     options=locations,
     default=locations[:1] if len(locations) > 0 else [],
     key="location_slicer",
     container=st.sidebar,
+    columns_per_row=1,
 )
 
 if not selected_locations:
@@ -387,14 +478,18 @@ if not selected_locations:
     st.stop()
 
 location_filtered_df = df[df["Location"].isin(selected_locations)].copy()
-range_options = sort_range_values(location_filtered_df["Range - Total"].dropna().unique())
 
-selected_ranges = button_multiselect(
+range_options = sort_range_values(
+    location_filtered_df["Range - Total"].dropna().unique()
+)
+
+selected_ranges = tile_button_multiselect(
     "Select Range - Total",
     options=range_options,
     default=range_options,
     key="range_total_slicer",
     container=st.sidebar,
+    columns_per_row=1,
 )
 
 if not selected_ranges:
@@ -410,7 +505,7 @@ if filtered_df.empty:
     st.stop()
 
 # =========================================================
-# OVERALL KPI SUMMARY - AVERAGES
+# OVERALL KPI SUMMARY
 # =========================================================
 st.subheader("Overall Summary")
 
@@ -485,7 +580,7 @@ st.dataframe(
 st.divider()
 
 # =========================================================
-# LOCATION SUMMARY TABLE - AVERAGES
+# LOCATION SUMMARY TABLE
 # =========================================================
 st.subheader("Selected Location Summary")
 
@@ -528,15 +623,17 @@ st.divider()
 # =========================================================
 st.subheader("Comparison Graphs")
 
-# Exclude locations with fewer than 10 filtered entries.
+# This section remains affected by slicers, except the separate constant pie chart below.
 location_counts = filtered_df.groupby("Location").size().reset_index(name="Entry Count")
-valid_locations = location_counts[location_counts["Entry Count"] >= 10]["Location"].tolist()
+valid_locations = location_counts[
+    location_counts["Entry Count"] >= 10
+]["Location"].tolist()
 
 comparison_df = filtered_df[filtered_df["Location"].isin(valid_locations)].copy()
 comparison_df = comparison_df.dropna(subset=["Total weekly"])
 
 # =========================================================
-# HIGHEST AND LOWEST WEEKLY HOURS BY LOCATION - ACTUAL
+# HIGHEST AND LOWEST WEEKLY HOURS BY LOCATION
 # =========================================================
 st.markdown("### Highest and Lowest Weekly Hours by Location")
 st.caption(
@@ -568,11 +665,11 @@ if len(comparison_df) > 0:
         barmode="group",
         text="Weekly Hours",
         hover_data={
-            "Company Group": True,
-            "Name": True,
             "Weekly Hours": ":.2f",
             "Measure": True,
             "Location": True,
+            "Company Group": False,
+            "Name": False,
         },
         title="Highest vs Lowest Weekly Hours by Location",
         color_discrete_map={
@@ -648,6 +745,76 @@ else:
 st.divider()
 
 # =========================================================
+# CONSTANT RANGE - TOTAL PIE CHART
+# NOT AFFECTED BY LOCATION OR RANGE SLICERS
+# =========================================================
+st.subheader("Range - Total Pie Chart")
+st.caption(
+    "This chart is constant and uses the full dataset. It is not affected by the Location or Range - Total slicers."
+)
+
+range_chart_source_df = df.copy()
+
+range_df = (
+    range_chart_source_df.groupby("Range - Total", as_index=False)
+    .agg(
+        Count=("Name", "count"),
+        Weekly_Average_Hours=("Total weekly", "mean"),
+        Monthly_Average_Hours=("Total Monthly", "mean"),
+    )
+    .sort_values("Count", ascending=False)
+)
+
+range_df["Weekly_Average_Hours"] = range_df["Weekly_Average_Hours"].round(2)
+range_df["Monthly_Average_Hours"] = range_df["Monthly_Average_Hours"].round(2)
+range_df["Recommended Monthly Hours"] = range_df["Range - Total"].apply(
+    recommendation_hours
+)
+range_df["Recommendation"] = range_df["Range - Total"].apply(recommendation_text)
+
+range_df = range_df.rename(
+    columns={
+        "Weekly_Average_Hours": "Weekly Average Hours",
+        "Monthly_Average_Hours": "Monthly Average Hours",
+    }
+)
+
+if len(range_df) > 0:
+    pie_fig = px.pie(
+        range_df,
+        names="Range - Total",
+        values="Count",
+        title="Range - Total Distribution - All Locations",
+        color_discrete_sequence=BCFOOD_SEQUENCE,
+    )
+
+    pie_fig.update_traces(
+        textposition="inside",
+        textinfo="percent+label",
+    )
+
+    pie_fig.update_layout(
+        height=550,
+        title_font_color=PRIMARY,
+        paper_bgcolor="white",
+    )
+
+    st.plotly_chart(pie_fig, use_container_width=True)
+
+    st.markdown("### Range - Total Table")
+
+    st.dataframe(
+        range_df,
+        use_container_width=True,
+        height=300,
+        hide_index=True,
+    )
+else:
+    st.info("No Range - Total records available.")
+
+st.divider()
+
+# =========================================================
 # DASHBOARD PER SELECTED LOCATION
 # =========================================================
 st.subheader("Location Details")
@@ -691,7 +858,7 @@ for tab, location in zip(location_tabs, selected_locations):
         table_df = table_df.sort_values("Weekly Hours", ascending=False)
 
         # =============================================
-        # LOCATION KPIs - AVERAGES
+        # LOCATION KPIs
         # =============================================
         c1, c2, c3, c4 = st.columns(4)
 
@@ -713,7 +880,7 @@ for tab, location in zip(location_tabs, selected_locations):
         )
 
         # =============================================
-        # WEEKLY HOURS BAR CHART - ACTUAL HOURS
+        # WEEKLY HOURS BAR CHART
         # =============================================
         st.markdown("### Weekly Hours Graph")
 
@@ -726,7 +893,7 @@ for tab, location in zip(location_tabs, selected_locations):
                     min_value=1,
                     max_value=len(table_df),
                     value=min(30, len(table_df)),
-                    key=f"top_n_{location}",
+                    key=f"top_n_{safe_widget_key(location)}",
                 )
 
                 chart_df = table_df.head(top_n)
@@ -762,78 +929,28 @@ for tab, location in zip(location_tabs, selected_locations):
         else:
             st.info("No weekly hours records available for this location.")
 
-        # =============================================
-        # RANGE - TOTAL PIE CHART
-        # =============================================
-        st.markdown("### Range - Total Pie Chart")
-
-        range_df = (
-            location_df.groupby("Range - Total", as_index=False)
-            .agg(
-                Count=("Name", "count"),
-                Weekly_Average_Hours=("Total weekly", "mean"),
-                Monthly_Average_Hours=("Total Monthly", "mean"),
-            )
-            .sort_values("Count", ascending=False)
-        )
-
-        range_df["Weekly_Average_Hours"] = range_df["Weekly_Average_Hours"].round(2)
-        range_df["Monthly_Average_Hours"] = range_df["Monthly_Average_Hours"].round(2)
-        range_df["Recommendation"] = range_df["Range - Total"].apply(recommendation_text)
-
-        range_df = range_df.rename(
-            columns={
-                "Weekly_Average_Hours": "Weekly Average Hours",
-                "Monthly_Average_Hours": "Monthly Average Hours",
-            }
-        )
-
-        if len(range_df) > 0:
-            pie_fig = px.pie(
-                range_df,
-                names="Range - Total",
-                values="Count",
-                title=f"Range - Total Distribution - {str(location).title()}",
-                color_discrete_sequence=BCFOOD_SEQUENCE,
-            )
-
-            pie_fig.update_traces(
-                textposition="inside",
-                textinfo="percent+label",
-            )
-
-            pie_fig.update_layout(
-                height=550,
-                title_font_color=PRIMARY,
-                paper_bgcolor="white",
-            )
-
-            st.plotly_chart(pie_fig, use_container_width=True)
-
-            st.markdown("### Range - Total Table")
-
-            st.dataframe(
-                range_df,
-                use_container_width=True,
-                height=300,
-                hide_index=True,
-            )
-        else:
-            st.info("No Range - Total records available for this location.")
-
         st.divider()
 
 # =========================================================
-# SAME RESTAURANT ACROSS DIFFERENT LOCATIONS - AVERAGES
+# SAME RESTAURANT ACROSS DIFFERENT LOCATIONS
 # MOVED TO END OF DASHBOARD
+# CONSTANT: NOT AFFECTED BY LOCATION OR RANGE SLICERS
 # =========================================================
 st.subheader("Same Restaurant Comparison Across Locations")
 st.caption(
-    "This compares restaurants that appear in more than one selected location. "
-    "Locations with fewer than 10 filtered entries are excluded."
+    "This section is constant and uses the full dataset. "
+    "It is not affected by the Location or Range - Total slicers. "
+    "Locations with fewer than 10 total entries are excluded."
 )
 
-same_company_base = comparison_df.copy()
+same_location_counts = df.groupby("Location").size().reset_index(name="Entry Count")
+
+same_valid_locations = same_location_counts[
+    same_location_counts["Entry Count"] >= 10
+]["Location"].tolist()
+
+same_company_base = df[df["Location"].isin(same_valid_locations)].copy()
+same_company_base = same_company_base.dropna(subset=["Total weekly"])
 
 company_location_summary = (
     same_company_base.groupby(["Company Group", "Location"], as_index=False)
@@ -895,12 +1012,13 @@ if len(company_location_summary) > 0:
 
     default_companies = priority_companies[:8] if priority_companies else company_options[:8]
 
-    selected_companies = button_multiselect(
+    selected_companies = tile_button_multiselect(
         "Select restaurants to compare across locations",
         options=company_options,
         default=default_companies,
         key="company_comparison_slicer",
         container=st,
+        columns_per_row=4,
     )
 
     selected_company_df = company_location_summary[
@@ -983,8 +1101,8 @@ if len(company_location_summary) > 0:
         st.info("Please select at least one restaurant to compare.")
 else:
     st.info(
-        "No same-restaurant matches were found across different selected locations "
-        "after excluding locations with fewer than 10 filtered entries."
+        "No same-restaurant matches were found across different locations "
+        "after excluding locations with fewer than 10 total entries."
     )
 
 # =========================================================
